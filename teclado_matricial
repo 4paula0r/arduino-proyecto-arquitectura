@@ -1,0 +1,176 @@
+#include <SPI.h>
+#include <MFRC522.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Keypad.h>
+
+#define SS_PIN 10
+#define RST_PIN 9
+
+MFRC522 rfid(SS_PIN, RST_PIN);
+LiquidCrystal_I2C lcd(0x27, 16, 2);   // si no muestra nada, prueba 0x3F
+
+// ----- Teclado 4x4 -----
+const byte FILAS = 4;
+const byte COLUMNAS = 4;
+char teclas[FILAS][COLUMNAS] = {
+  {'1', '2', '3', 'A'},
+  {'4', '5', '6', 'B'},
+  {'7', '8', '9', 'C'},
+  {'*', '0', '#', 'D'}
+};
+byte pinesFilas[FILAS] = {2, 3, 4, 5};
+byte pinesColumnas[COLUMNAS] = {6, 7, 8, A0};
+Keypad teclado = Keypad(makeKeymap(teclas), pinesFilas, pinesColumnas, FILAS, COLUMNAS);
+
+// ----- Usuarios: cada tarjeta tiene su propio PIN de 4 dígitos -----
+struct Usuario {
+  const char* uid;
+  const char* pin;
+  const char* nombre;
+};
+
+Usuario usuarios[] = {
+  {"53E0D906", "1234", "Usuario 1"},   // <-- cambia por tus UIDs y PINs
+  {"11223344", "4321", "Usuario 2"},
+};
+const byte NUM_USUARIOS = sizeof(usuarios) / sizeof(usuarios[0]);
+
+const byte LONG_PIN = 4;
+const unsigned long TIEMPO_LIMITE = 15000;   // 15 s para ingresar el PIN
+
+enum Estado { ESPERANDO_RFID, ESPERANDO_PIN, ACCESO_CONCEDIDO, ACCESO_DENEGADO };
+Estado estado = ESPERANDO_RFID;
+
+String pinIngresado = "";
+int usuarioActual = -1;
+unsigned long inicioPin = 0;
+
+String leerTarjeta() {
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial())
+    return "";
+
+  String uid = "";
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    if (rfid.uid.uidByte[i] < 0x10) uid += "0";
+    uid += String(rfid.uid.uidByte[i], HEX);
+  }
+  uid.toUpperCase();
+  rfid.PICC_HaltA();
+  return uid;
+}
+
+// Devuelve la posición del usuario en la lista, o -1 si no existe
+int buscarUsuario(String uid) {
+  for (byte i = 0; i < NUM_USUARIOS; i++) {
+    if (uid == usuarios[i].uid) return i;
+  }
+  return -1;
+}
+
+void mostrarInicio() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("ACERQUE TARJETA");
+}
+
+// Muestra "INGRESE SU PIN" y ____ ; cada dígito se reemplaza por *
+void mostrarPantallaPin() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("INGRESE SU PIN");
+  lcd.setCursor(0, 1);
+  for (byte i = 0; i < LONG_PIN; i++) {
+    lcd.print(i < pinIngresado.length() ? '*' : '_');
+  }
+}
+
+void setup() {
+  Serial.begin(9600);
+  SPI.begin();
+  rfid.PCD_Init();
+  lcd.init();
+  lcd.backlight();
+  mostrarInicio();
+}
+
+void loop() {
+  switch (estado) {
+
+    case ESPERANDO_RFID: {
+      String uid = leerTarjeta();
+
+      if (uid != "") {
+        Serial.println(uid);
+        usuarioActual = buscarUsuario(uid);
+
+        if (usuarioActual >= 0) {
+          pinIngresado = "";
+          mostrarPantallaPin();
+          inicioPin = millis();
+          estado = ESPERANDO_PIN;
+        } else {
+          estado = ACCESO_DENEGADO;
+        }
+      }
+      break;
+    }
+
+    case ESPERANDO_PIN: {
+      char tecla = teclado.getKey();
+
+      if (tecla) {
+        inicioPin = millis();
+
+        if (tecla >= '0' && tecla <= '9') {            // solo dígitos numéricos
+          if (pinIngresado.length() < LONG_PIN) {
+            pinIngresado += tecla;
+            mostrarPantallaPin();
+
+            if (pinIngresado.length() == LONG_PIN) {   // al completar 4 dígitos, verifica
+              delay(300);                              // deja ver el último *
+              if (pinIngresado == usuarios[usuarioActual].pin) {
+                estado = ACCESO_CONCEDIDO;
+              } else {
+                estado = ACCESO_DENEGADO;
+              }
+            }
+          }
+        } else if (tecla == '*') {                     // borrar lo escrito
+          pinIngresado = "";
+          mostrarPantallaPin();
+        }
+        // las demás teclas (A, B, C, D, #) se ignoran
+      }
+
+      if (estado == ESPERANDO_PIN && millis() - inicioPin > TIEMPO_LIMITE) {
+        lcd.clear();
+        lcd.print("TIEMPO AGOTADO");
+        delay(1500);
+        mostrarInicio();
+        estado = ESPERANDO_RFID;
+      }
+      break;
+    }
+
+    case ACCESO_CONCEDIDO:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("ACCESO CONCEDIDO");
+      lcd.setCursor(0, 1);
+      lcd.print(usuarios[usuarioActual].nombre);
+      delay(2000);
+      mostrarInicio();
+      estado = ESPERANDO_RFID;
+      break;
+
+    case ACCESO_DENEGADO:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("ACCESO DENEGADO");
+      delay(2000);
+      mostrarInicio();
+      estado = ESPERANDO_RFID;
+      break;
+  }
+}
