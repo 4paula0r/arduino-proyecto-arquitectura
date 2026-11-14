@@ -64,3 +64,14 @@ Incluye piezas para la carcasa, puerta, soportes y mecanismo asociado al servo.
 ### `pinout.pdf`
 
 Diagrama de referencia para las conexiones utilizadas en el proyecto.
+
+
+### Diseño y adaptación del prototipo físico
+
+Para la construcción del prototipo se utilizó como base el modelo 3D proporcionado por el docente, disponible en el repositorio de referencia del proyecto.
+
+Se realizaron modificaciones en la estructura original para permitir que el módulo lector RFID quedara accesible desde el exterior del prototipo, facilitando la lectura de tarjetas sin necesidad de abrir o manipular la estructura.
+
+Esta adaptación permitió mejorar la accesibilidad y la interacción del usuario con el sistema, conservando el diseño general del modelo proporcionado.
+
+**Modelo 3D de referencia:** https://github.com/memepelle/arduino-security-project
